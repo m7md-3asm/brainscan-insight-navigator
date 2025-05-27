@@ -1,10 +1,9 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Search, Calendar, Brain, FileText, Download, Eye, RefreshCw } from 'lucide-react';
+import { Search, Calendar, Brain, FileText, Download, Eye, RefreshCw, FolderDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface CaseRecord {
@@ -106,6 +105,40 @@ export const CaseHistory = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const downloadCaseFolder = async (caseId: string) => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/download-case/${caseId}`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download case folder');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${caseId}_complete_case.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Download Started",
+        description: `Complete case folder for ${caseId} is being downloaded`,
+      });
+    } catch (error) {
+      console.error('Download error:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download case folder",
+        variant: "destructive",
+      });
+    }
   };
 
   const viewCase = (case_: CaseRecord) => {
@@ -270,7 +303,16 @@ export const CaseHistory = () => {
                         className="flex items-center gap-1"
                       >
                         <Download className="w-4 h-4" />
-                        Download
+                        Report
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => downloadCaseFolder(case_.case_id)}
+                        className="flex items-center gap-1"
+                      >
+                        <FolderDown className="w-4 h-4" />
+                        Complete Case
                       </Button>
                     </div>
                   </div>
@@ -330,13 +372,21 @@ export const CaseHistory = () => {
                       )}
                     </div>
                   </div>
-                  <div className="pt-4 border-t">
+                  <div className="pt-4 border-t flex gap-2">
                     <Button 
                       onClick={() => downloadResults(selectedCase.case_id)}
                       className="flex items-center gap-2"
                     >
                       <Download className="w-4 h-4" />
-                      Download Full Report
+                      Download Report
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => downloadCaseFolder(selectedCase.case_id)}
+                      className="flex items-center gap-2"
+                    >
+                      <FolderDown className="w-4 h-4" />
+                      Download Complete Case
                     </Button>
                   </div>
                 </div>
