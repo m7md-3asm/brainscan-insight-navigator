@@ -43,6 +43,7 @@ export const ProcessingStatus = () => {
         const relevantCases = data.cases.filter((case_: any) => 
           case_.status === 'processing' || 
           case_.status === 'error' ||
+          case_.status === 'cancelled' ||
           (case_.status === 'done' && isRecentCase(case_.date))
         );
 
@@ -76,8 +77,8 @@ export const ProcessingStatus = () => {
     } catch (error) {
       console.error('Error fetching cases:', error);
       toast({
-        title: "Error",
-        description: "Failed to fetch processing status",
+        title: "Connection Error",
+        description: "Unable to connect to the processing server. Please ensure the Flask backend is running on localhost:5000",
         variant: "destructive",
       });
     } finally {
@@ -89,7 +90,7 @@ export const ProcessingStatus = () => {
     const caseDate = new Date(dateString);
     const now = new Date();
     const hoursDiff = (now.getTime() - caseDate.getTime()) / (1000 * 60 * 60);
-    return hoursDiff < 24; // Show cases from last 24 hours
+    return hoursDiff < 24;
   };
 
   const cancelCase = async (caseId: string) => {
@@ -103,7 +104,7 @@ export const ProcessingStatus = () => {
           title: "Processing Cancelled",
           description: `Case ${caseId} has been cancelled`,
         });
-        fetchCases(); // Refresh the list
+        fetchCases();
       } else {
         throw new Error('Failed to cancel processing');
       }
@@ -149,12 +150,12 @@ export const ProcessingStatus = () => {
   useEffect(() => {
     fetchCases();
     
-    // Auto-refresh every 5 seconds for processing cases
+    // Auto-refresh every 3 seconds for processing cases
     const interval = setInterval(() => {
       if (processingCases.some(c => c.status === 'processing')) {
         fetchCases();
       }
-    }, 5000);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [processingCases]);
@@ -229,11 +230,6 @@ export const ProcessingStatus = () => {
                     </div>
                     <Progress value={case_.progress.percentage} className="w-full" />
                     <p className="text-sm text-gray-600">{case_.progress.message}</p>
-                    {case_.progress.details && (
-                      <div className="text-xs text-gray-500">
-                        <pre>{JSON.stringify(case_.progress.details, null, 2)}</pre>
-                      </div>
-                    )}
                   </div>
                 )}
 

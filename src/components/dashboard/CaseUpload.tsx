@@ -11,7 +11,6 @@ export const CaseUpload = () => {
   const [caseId, setCaseId] = useState('');
   const [files, setFiles] = useState<FileList | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [detectedScans, setDetectedScans] = useState<{[key: string]: string}>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -26,6 +25,7 @@ export const CaseUpload = () => {
     Array.from(fileList).forEach(file => {
       const filename = file.name.toLowerCase();
       
+      // Match your Flask detection logic
       if (filename.includes('t1') && !filename.includes('ce') && !filename.includes('t10')) {
         detected['T1'] = file.name;
       } else if (filename.includes('t2') && !filename.includes('t2*') && !filename.includes('t20')) {
@@ -63,7 +63,7 @@ export const CaseUpload = () => {
       return !data.exists;
     } catch (error) {
       console.error('Error checking case ID:', error);
-      return true; // Allow if check fails
+      return true;
     }
   };
 
@@ -109,7 +109,6 @@ export const CaseUpload = () => {
     }
 
     setIsUploading(true);
-    setUploadProgress(0);
 
     try {
       const formData = new FormData();
@@ -139,6 +138,7 @@ export const CaseUpload = () => {
         setDetectedScans({});
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
+          fileInputRef.current.webkitdirectory = false;
         }
       } else {
         throw new Error(result.message || 'Upload failed');
@@ -152,7 +152,6 @@ export const CaseUpload = () => {
       });
     } finally {
       setIsUploading(false);
-      setUploadProgress(0);
     }
   };
 
@@ -201,16 +200,7 @@ export const CaseUpload = () => {
                 className="flex items-center gap-2"
               >
                 <FolderOpen className="w-4 h-4" />
-                Select Folder
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                className="flex items-center gap-2"
-              >
-                <Upload className="w-4 h-4" />
-                Select Files
+                Select Case Folder
               </Button>
             </div>
             
@@ -226,7 +216,7 @@ export const CaseUpload = () => {
             {files && files.length > 0 && (
               <div className="space-y-4">
                 <div className="text-sm text-gray-600">
-                  {files.length} files selected
+                  {files.length} files selected from folder
                 </div>
 
                 {/* Scan Detection Status */}
@@ -238,7 +228,7 @@ export const CaseUpload = () => {
                         <Icon className={`w-4 h-4 ${color}`} />
                         <span className="font-medium">{scanType}</span>
                         <span className={`text-sm ${color}`}>
-                          {detectedScans[scanType] ? detectedScans[scanType] : status}
+                          {detectedScans[scanType] ? '✓' : status}
                         </span>
                       </div>
                     );
@@ -264,22 +254,8 @@ export const CaseUpload = () => {
             disabled={isUploading || !caseId.trim() || !files || requiredScans.some(scan => !detectedScans[scan])}
             className="w-full"
           >
-            {isUploading ? 'Uploading...' : 'Upload and Start Analysis'}
+            {isUploading ? 'Uploading and Processing...' : 'Upload and Start Analysis'}
           </Button>
-
-          {isUploading && (
-            <div className="space-y-2">
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-              <div className="text-sm text-gray-600 text-center">
-                Uploading files...
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -291,19 +267,15 @@ export const CaseUpload = () => {
         <CardContent className="space-y-3 text-sm text-gray-600">
           <div className="flex items-start gap-2">
             <CheckCircle className="w-4 h-4 text-green-600 mt-0.5" />
-            <span><strong>Required:</strong> T1 and T2 weighted scans</span>
+            <span><strong>Required:</strong> T1 and T2 weighted scans (.nii or .nii.gz)</span>
           </div>
           <div className="flex items-start gap-2">
             <FileText className="w-4 h-4 text-blue-600 mt-0.5" />
             <span><strong>Optional:</strong> T1CE (contrast-enhanced) and FLAIR scans</span>
           </div>
           <div className="flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5" />
-            <span><strong>Format:</strong> NIfTI files (.nii or .nii.gz)</span>
-          </div>
-          <div className="flex items-start gap-2">
             <FolderOpen className="w-4 h-4 text-purple-600 mt-0.5" />
-            <span><strong>Tip:</strong> Use "Select Folder" to upload an entire case directory</span>
+            <span><strong>Tip:</strong> Select the entire case folder containing all MRI modalities</span>
           </div>
         </CardContent>
       </Card>
