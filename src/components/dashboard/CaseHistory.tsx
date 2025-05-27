@@ -1,105 +1,143 @@
 
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  Search, 
-  Download, 
-  Eye, 
-  Brain,
-  Calendar,
-  FileText,
-  Layers
-} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Search, Calendar, Brain, FileText, Download, Eye, RefreshCw } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
-interface HistoricalCase {
-  id: string;
+interface CaseRecord {
+  case_id: string;
+  status: 'done' | 'error' | 'processing' | 'cancelled';
   date: string;
-  status: 'completed' | 'error';
-  tumorDetected: boolean;
-  tumorType: string;
-  grade?: string;
-  confidence: number;
-  processingTime: string;
-  hasSegmentation: boolean;
+  results?: {
+    tumor_detection: string;
+    tumor_probability: string;
+    tumor_type: string;
+    glioma_grade: string;
+    scan_file: string;
+    segmentation_file: string;
+  };
 }
 
 export const CaseHistory = () => {
+  const [cases, setCases] = useState<CaseRecord[]>([]);
+  const [filteredCases, setFilteredCases] = useState<CaseRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [cases] = useState<HistoricalCase[]>([
-    {
-      id: 'CASE_002',
-      date: '2024-01-27 14:30',
-      status: 'completed',
-      tumorDetected: true,
-      tumorType: 'Glioma',
-      grade: 'Grade II',
-      confidence: 0.92,
-      processingTime: '4m 32s',
-      hasSegmentation: true
-    },
-    {
-      id: 'CASE_001',
-      date: '2024-01-27 13:15',
-      status: 'completed',
-      tumorDetected: true,
-      tumorType: 'Meningioma',
-      confidence: 0.87,
-      processingTime: '3m 45s',
-      hasSegmentation: true
-    },
-    {
-      id: 'CASE_003',
-      date: '2024-01-26 16:20',
-      status: 'completed',
-      tumorDetected: false,
-      tumorType: 'No Tumor',
-      confidence: 0.95,
-      processingTime: '2m 18s',
-      hasSegmentation: false
-    },
-    {
-      id: 'CASE_004',
-      date: '2024-01-26 11:45',
-      status: 'completed',
-      tumorDetected: true,
-      tumorType: 'Pituitary',
-      confidence: 0.89,
-      processingTime: '3m 52s',
-      hasSegmentation: true
-    }
-  ]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
+  const { toast } = useToast();
 
-  const filteredCases = cases.filter(case_ =>
-    case_.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    case_.tumorType.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const fetchCases = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/cases');
+      const data = await response.json();
+      
+      if (data.cases) {
+        // Fetch detailed results for completed cases
+        const casesWithResults = await Promise.all(
+          data.cases.map(async (case_: any) => {
+            if (case_.status === 'done') {
+              try {
+                const resultResponse = await fetch(`http://localhost:5000/api/results/${case_.case_id}`);
+                const resultData = await resultResponse.json();
+                return {
+                  ...case_,
+                  results: resultData.status === 'done' ? resultData : undefined
+                };
+              } catch (error) {
+                console.error(`Error fetching results for case ${case_.case_id}:`, error);
+                return case_;
+              }
+            }
+            return case_;
+          })
+        );
 
-  const getTumorBadge = (tumorDetected: boolean, tumorType: string) => {
-    if (!tumorDetected) {
-      return <Badge variant="outline" className="text-green-600 border-green-600">No Tumor</Badge>;
+        setCases(casesWithResults);
+        setFilteredCases(casesWithResults);
+      }
+    } catch (error) {
+      console.error('Error fetching cases:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch case history",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
     }
-    
-    const colors = {
-      'Glioma': 'text-red-600 border-red-600',
-      'Meningioma': 'text-orange-600 border-orange-600',
-      'Pituitary': 'text-purple-600 border-purple-600'
-    };
-    
-    return (
-      <Badge variant="outline" className={colors[tumorType as keyof typeof colors] || 'text-blue-600 border-blue-600'}>
-        {tumorType}
-      </Badge>
-    );
   };
+
+  const handleSearch = (term: string) => {
+    setSearchTerm(term);
+    if (!term.trim()) {
+      setFilteredCases(cases);
+    } else {
+      const filtered = cases.filter(case_ =>
+        case_.case_id.toLowerCase().includes(term.toLowerCase()) ||
+        (case_.results?.tumor_type && case_.results.tumor_type.toLowerCase().includes(term.toLowerCase()))
+      );
+      setFilteredCases(filtered);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'done':
+        return 'bg-green-100 text-green-800';
+      case 'error':
+        return 'bg-red-100 text-red-800';
+      case 'processing':
+        return 'bg-blue-100 text-blue-800';
+      case 'cancelled':
+        return 'bg-orange-100 text-orange-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const downloadResults = (caseId: string) => {
+    const url = `http://localhost:5000/results/${caseId}/results.txt`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${caseId}_results.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const viewCase = (case_: CaseRecord) => {
+    setSelectedCase(case_);
+  };
+
+  useEffect(() => {
+    fetchCases();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Loading case history...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Case History</h2>
-        <Badge variant="secondary">{cases.length} Total Cases</Badge>
+        <div>
+          <h2 className="text-2xl font-bold">Case History</h2>
+          <p className="text-gray-600">View and manage processed cases</p>
+        </div>
+        <Button variant="outline" onClick={fetchCases} className="flex items-center gap-2">
+          <RefreshCw className="w-4 h-4" />
+          Refresh
+        </Button>
       </div>
 
       {/* Search */}
@@ -108,95 +146,204 @@ export const CaseHistory = () => {
         <Input
           placeholder="Search cases by ID or tumor type..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => handleSearch(e.target.value)}
           className="pl-10"
         />
       </div>
 
-      {/* Cases List */}
-      <div className="space-y-4">
-        {filteredCases.map((case_) => (
-          <Card key={case_.id} className="hover:shadow-md transition-shadow">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Brain className="w-5 h-5" />
-                  {case_.id}
-                </CardTitle>
-                <div className="flex items-center gap-2">
-                  {getTumorBadge(case_.tumorDetected, case_.tumorType)}
-                  <Badge variant={case_.status === 'completed' ? 'default' : 'destructive'}>
-                    {case_.status}
-                  </Badge>
-                </div>
-              </div>
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                <div className="flex items-center gap-1">
-                  <Calendar className="w-4 h-4" />
-                  {case_.date}
-                </div>
-                <div>Processing: {case_.processingTime}</div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <div>
-                  <p className="text-sm text-gray-600">Detection</p>
-                  <p className="font-medium">{case_.tumorDetected ? 'Tumor Present' : 'No Tumor'}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Type</p>
-                  <p className="font-medium">{case_.tumorType}</p>
-                </div>
-                {case_.grade && (
-                  <div>
-                    <p className="text-sm text-gray-600">Grade</p>
-                    <p className="font-medium">{case_.grade}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-sm text-gray-600">Confidence</p>
-                  <p className="font-medium">{(case_.confidence * 100).toFixed(1)}%</p>
-                </div>
-              </div>
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-blue-600">{cases.length}</div>
+            <div className="text-sm text-gray-600">Total Cases</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-green-600">
+              {cases.filter(c => c.status === 'done').length}
+            </div>
+            <div className="text-sm text-gray-600">Completed</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-red-600">
+              {cases.filter(c => c.results?.tumor_detection !== 'No Tumor' && c.results?.tumor_detection).length}
+            </div>
+            <div className="text-sm text-gray-600">Tumors Detected</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-blue-600">
+              {cases.filter(c => c.status === 'processing').length}
+            </div>
+            <div className="text-sm text-gray-600">Processing</div>
+          </CardContent>
+        </Card>
+      </div>
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  {case_.hasSegmentation && (
-                    <div className="flex items-center gap-1">
-                      <Layers className="w-4 h-4" />
-                      Segmentation Available
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm">
-                    <Eye className="w-4 h-4 mr-1" />
-                    View Details
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    <FileText className="w-4 h-4 mr-1" />
-                    Report
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    <Download className="w-4 h-4 mr-1" />
-                    Download
-                  </Button>
-                </div>
+      {/* Case List */}
+      <div className="space-y-4">
+        {filteredCases.length === 0 ? (
+          <Card>
+            <CardContent className="py-8">
+              <div className="text-center text-gray-500">
+                <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium">No cases found</p>
+                <p className="text-sm">
+                  {searchTerm ? 'Try adjusting your search terms' : 'Upload your first case to get started'}
+                </p>
               </div>
             </CardContent>
           </Card>
-        ))}
+        ) : (
+          filteredCases.map((case_) => (
+            <Card key={case_.case_id} className="hover:shadow-md transition-shadow">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Brain className="w-5 h-5 text-blue-600" />
+                    <div>
+                      <CardTitle className="text-lg">{case_.case_id}</CardTitle>
+                      <CardDescription className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        {case_.date}
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className={getStatusColor(case_.status)}>
+                      {case_.status.charAt(0).toUpperCase() + case_.status.slice(1)}
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {case_.results && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="font-medium text-gray-600">Detection:</span>
+                        <p className={`font-medium ${
+                          case_.results.tumor_detection === 'No Tumor' 
+                            ? 'text-green-600' 
+                            : 'text-red-600'
+                        }`}>
+                          {case_.results.tumor_detection}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Confidence:</span>
+                        <p className="font-medium">{case_.results.tumor_probability}</p>
+                      </div>
+                      {case_.results.tumor_detection !== 'No Tumor' && (
+                        <>
+                          <div>
+                            <span className="font-medium text-gray-600">Type:</span>
+                            <p className="font-medium">{case_.results.tumor_type}</p>
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-600">Grade:</span>
+                            <p className="font-medium">{case_.results.glioma_grade}</p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-2 pt-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => viewCase(case_)}
+                        className="flex items-center gap-1"
+                      >
+                        <Eye className="w-4 h-4" />
+                        View Details
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => downloadResults(case_.case_id)}
+                        className="flex items-center gap-1"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {case_.status === 'error' && (
+                  <div className="text-sm text-red-600">
+                    Processing failed. Check logs for details.
+                  </div>
+                )}
+
+                {case_.status === 'processing' && (
+                  <div className="text-sm text-blue-600">
+                    Currently being processed...
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))
+        )}
       </div>
 
-      {filteredCases.length === 0 && (
-        <Card>
-          <CardContent className="text-center py-12">
-            <Search className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No cases found</h3>
-            <p className="text-gray-600">Try adjusting your search criteria</p>
-          </CardContent>
-        </Card>
+      {/* Case Detail Modal */}
+      {selectedCase && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <Card className="w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Case Details: {selectedCase.case_id}</CardTitle>
+                <Button variant="outline" onClick={() => setSelectedCase(null)}>
+                  ✕
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {selectedCase.results && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <h4 className="font-semibold">Detection Results</h4>
+                      <p><strong>Status:</strong> {selectedCase.results.tumor_detection}</p>
+                      <p><strong>Confidence:</strong> {selectedCase.results.tumor_probability}</p>
+                      {selectedCase.results.tumor_type && (
+                        <p><strong>Type:</strong> {selectedCase.results.tumor_type}</p>
+                      )}
+                      {selectedCase.results.glioma_grade && selectedCase.results.glioma_grade !== 'N/A' && (
+                        <p><strong>Grade:</strong> {selectedCase.results.glioma_grade}</p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <h4 className="font-semibold">Files</h4>
+                      {selectedCase.results.scan_file && (
+                        <p><strong>Scan:</strong> {selectedCase.results.scan_file}</p>
+                      )}
+                      {selectedCase.results.segmentation_file && (
+                        <p><strong>Segmentation:</strong> {selectedCase.results.segmentation_file}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="pt-4 border-t">
+                    <Button 
+                      onClick={() => downloadResults(selectedCase.case_id)}
+                      className="flex items-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download Full Report
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

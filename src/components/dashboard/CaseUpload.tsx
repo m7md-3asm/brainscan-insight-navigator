@@ -1,229 +1,312 @@
 
-import { useState, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Upload, FileImage, AlertCircle, CheckCircle, X } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Upload, FolderOpen, AlertCircle, CheckCircle, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-
-interface MRIFiles {
-  t1: File | null;
-  t2: File | null;
-  t1ce: File | null;
-  flair: File | null;
-}
 
 export const CaseUpload = () => {
   const [caseId, setCaseId] = useState('');
-  const [files, setFiles] = useState<MRIFiles>({
-    t1: null,
-    t2: null,
-    t1ce: null,
-    flair: null
-  });
+  const [files, setFiles] = useState<FileList | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [detectedScans, setDetectedScans] = useState<{[key: string]: string}>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  const handleFileChange = (modality: keyof MRIFiles, file: File | null) => {
-    setFiles(prev => ({
-      ...prev,
-      [modality]: file
-    }));
+  const requiredScans = ['T1', 'T2'];
+  const optionalScans = ['T1CE', 'FLAIR'];
+  const allScans = [...requiredScans, ...optionalScans];
+
+  const detectScanTypes = (fileList: FileList) => {
+    const detected: {[key: string]: string} = {};
+    
+    Array.from(fileList).forEach(file => {
+      const filename = file.name.toLowerCase();
+      
+      if (filename.includes('t1') && !filename.includes('ce') && !filename.includes('t10')) {
+        detected['T1'] = file.name;
+      } else if (filename.includes('t2') && !filename.includes('t2*') && !filename.includes('t20')) {
+        detected['T2'] = file.name;
+      } else if (filename.includes('t1ce') || filename.includes('t1_ce') || filename.includes('t1-ce')) {
+        detected['T1CE'] = file.name;
+      } else if (filename.includes('flair')) {
+        detected['FLAIR'] = file.name;
+      }
+    });
+    
+    return detected;
   };
 
-  const handleDrop = useCallback((e: React.DragEvent, modality: keyof MRIFiles) => {
-    e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    const niftiFile = droppedFiles.find(file => 
-      file.name.toLowerCase().endsWith('.nii.gz') || 
-      file.name.toLowerCase().endsWith('.nii')
-    );
-    
-    if (niftiFile) {
-      handleFileChange(modality, niftiFile);
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files;
+    if (selectedFiles && selectedFiles.length > 0) {
+      setFiles(selectedFiles);
+      const detected = detectScanTypes(selectedFiles);
+      setDetectedScans(detected);
     }
-  }, []);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
   };
 
-  const removeFile = (modality: keyof MRIFiles) => {
-    handleFileChange(modality, null);
+  const handleFolderSelect = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.webkitdirectory = true;
+      fileInputRef.current.click();
+    }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  const validateCaseId = async (id: string) => {
+    try {
+      const response = await fetch(`http://localhost:5000/check_case_id/${id}`);
+      const data = await response.json();
+      return !data.exists;
+    } catch (error) {
+      console.error('Error checking case ID:', error);
+      return true; // Allow if check fails
+    }
+  };
+
+  const handleUpload = async () => {
     if (!caseId.trim()) {
       toast({
-        title: "Case ID Required",
+        title: "Error",
         description: "Please enter a case ID",
         variant: "destructive",
       });
       return;
     }
 
-    const uploadedFiles = Object.entries(files).filter(([_, file]) => file !== null);
-    if (uploadedFiles.length === 0) {
+    if (!files || files.length === 0) {
       toast({
-        title: "No Files Selected",
-        description: "Please upload at least one MRI modality",
+        title: "Error",
+        description: "Please select MRI scan files",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate case ID is unique
+    const isUnique = await validateCaseId(caseId);
+    if (!isUnique) {
+      toast({
+        title: "Error",
+        description: "Case ID already exists. Please choose a different ID.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check if required scans are present
+    const missingRequired = requiredScans.filter(scan => !detectedScans[scan]);
+    if (missingRequired.length > 0) {
+      toast({
+        title: "Missing Required Scans",
+        description: `Please include: ${missingRequired.join(', ')}`,
         variant: "destructive",
       });
       return;
     }
 
     setIsUploading(true);
+    setUploadProgress(0);
 
     try {
-      // Simulate upload to Flask server
-      console.log('Uploading case:', caseId);
-      console.log('Files:', uploadedFiles);
+      const formData = new FormData();
+      formData.append('case_id', caseId);
       
-      // Here you would typically send to your Flask server
-      // const formData = new FormData();
-      // formData.append('case_id', caseId);
-      // uploadedFiles.forEach(([modality, file]) => {
-      //   formData.append(modality, file);
-      // });
-      
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      toast({
-        title: "Upload Successful",
-        description: `Case ${caseId} uploaded successfully. Processing will begin shortly.`,
+      // Add all files
+      Array.from(files).forEach(file => {
+        formData.append('files', file);
       });
 
-      // Reset form
-      setCaseId('');
-      setFiles({ t1: null, t2: null, t1ce: null, flair: null });
-      
+      const response = await fetch('http://localhost:5000/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        toast({
+          title: "Upload Successful",
+          description: "Processing started. Check the Processing tab for updates.",
+        });
+        
+        // Reset form
+        setCaseId('');
+        setFiles(null);
+        setDetectedScans({});
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } else {
+        throw new Error(result.message || 'Upload failed');
+      }
     } catch (error) {
+      console.error('Upload error:', error);
       toast({
         title: "Upload Failed",
-        description: "There was an error uploading the case. Please try again.",
+        description: error instanceof Error ? error.message : "An error occurred during upload",
         variant: "destructive",
       });
     } finally {
       setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
-  const modalityInfo = {
-    t1: { name: 'T1-weighted', description: 'Anatomical structure' },
-    t2: { name: 'T2-weighted', description: 'Fluid detection' },
-    t1ce: { name: 'T1 Contrast Enhanced', description: 'Tumor enhancement' },
-    flair: { name: 'FLAIR', description: 'Lesion detection' }
+  const getScanStatus = (scanType: string) => {
+    if (detectedScans[scanType]) {
+      return { icon: CheckCircle, color: 'text-green-600', status: 'Found' };
+    } else if (requiredScans.includes(scanType)) {
+      return { icon: AlertCircle, color: 'text-red-600', status: 'Required' };
+    } else {
+      return { icon: FileText, color: 'text-gray-400', status: 'Optional' };
+    }
   };
 
   return (
-    <Card className="max-w-4xl mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Upload className="w-5 h-5" />
-          Upload New Case
-        </CardTitle>
-        <CardDescription>
-          Upload MRI modalities for brain tumor analysis. Supported formats: .nii, .nii.gz
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Case ID */}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Upload className="w-5 h-5" />
+            Upload New Case
+          </CardTitle>
+          <CardDescription>
+            Upload MRI scans for brain tumor detection and analysis
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Case ID Input */}
           <div className="space-y-2">
             <Label htmlFor="caseId">Case ID</Label>
             <Input
               id="caseId"
-              type="text"
               value={caseId}
               onChange={(e) => setCaseId(e.target.value)}
-              placeholder="Enter unique case identifier"
-              required
+              placeholder="Enter unique case identifier (e.g., CASE_001)"
+              disabled={isUploading}
             />
           </div>
 
-          {/* File Upload Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {Object.entries(modalityInfo).map(([modality, info]) => (
-              <div
-                key={modality}
-                className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-400 transition-colors"
-                onDrop={(e) => handleDrop(e, modality as keyof MRIFiles)}
-                onDragOver={handleDragOver}
+          {/* File Upload */}
+          <div className="space-y-4">
+            <div className="flex gap-4">
+              <Button
+                variant="outline"
+                onClick={handleFolderSelect}
+                disabled={isUploading}
+                className="flex items-center gap-2"
               >
-                <div className="text-center">
-                  <FileImage className="mx-auto h-8 w-8 text-gray-400 mb-2" />
-                  <h3 className="font-medium text-gray-900">{info.name}</h3>
-                  <p className="text-sm text-gray-600 mb-3">{info.description}</p>
-                  
-                  {files[modality as keyof MRIFiles] ? (
-                    <div className="flex items-center justify-between bg-green-50 p-2 rounded">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-600" />
-                        <span className="text-sm text-green-800">
-                          {files[modality as keyof MRIFiles]!.name}
+                <FolderOpen className="w-4 h-4" />
+                Select Folder
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                Select Files
+              </Button>
+            </div>
+            
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".nii.gz,.nii"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            {files && files.length > 0 && (
+              <div className="space-y-4">
+                <div className="text-sm text-gray-600">
+                  {files.length} files selected
+                </div>
+
+                {/* Scan Detection Status */}
+                <div className="grid grid-cols-2 gap-4">
+                  {allScans.map(scanType => {
+                    const { icon: Icon, color, status } = getScanStatus(scanType);
+                    return (
+                      <div key={scanType} className="flex items-center gap-2 p-2 border rounded">
+                        <Icon className={`w-4 h-4 ${color}`} />
+                        <span className="font-medium">{scanType}</span>
+                        <span className={`text-sm ${color}`}>
+                          {detectedScans[scanType] ? detectedScans[scanType] : status}
                         </span>
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeFile(modality as keyof MRIFiles)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div>
-                      <input
-                        type="file"
-                        accept=".nii,.nii.gz"
-                        onChange={(e) => handleFileChange(
-                          modality as keyof MRIFiles,
-                          e.target.files?.[0] || null
-                        )}
-                        className="hidden"
-                        id={`file-${modality}`}
-                      />
-                      <label
-                        htmlFor={`file-${modality}`}
-                        className="cursor-pointer text-blue-600 hover:text-blue-800"
-                      >
-                        Click to select or drag & drop
-                      </label>
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
+
+                {/* Missing Required Files Warning */}
+                {requiredScans.some(scan => !detectedScans[scan]) && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded">
+                    <AlertCircle className="w-4 h-4 text-red-600 mt-0.5" />
+                    <div className="text-sm text-red-700">
+                      <strong>Missing required scans:</strong> {requiredScans.filter(scan => !detectedScans[scan]).join(', ')}
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+            )}
           </div>
 
-          {/* Info Box */}
-          <div className="flex items-start gap-2 p-4 bg-blue-50 rounded-lg">
-            <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-blue-800">
-              <p className="font-medium mb-1">Upload Guidelines:</p>
-              <ul className="list-disc list-inside space-y-1">
-                <li>At least one modality is required for processing</li>
-                <li>T1CE is recommended for better tumor detection</li>
-                <li>All modalities should be from the same patient session</li>
-                <li>Files should be in NIfTI format (.nii or .nii.gz)</li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Submit Button */}
+          {/* Upload Button */}
           <Button
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700"
-            disabled={isUploading}
+            onClick={handleUpload}
+            disabled={isUploading || !caseId.trim() || !files || requiredScans.some(scan => !detectedScans[scan])}
+            className="w-full"
           >
-            {isUploading ? 'Uploading & Processing...' : 'Upload & Start Analysis'}
+            {isUploading ? 'Uploading...' : 'Upload and Start Analysis'}
           </Button>
-        </form>
-      </CardContent>
-    </Card>
+
+          {isUploading && (
+            <div className="space-y-2">
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <div className="text-sm text-gray-600 text-center">
+                Uploading files...
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Instructions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Upload Instructions</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-gray-600">
+          <div className="flex items-start gap-2">
+            <CheckCircle className="w-4 h-4 text-green-600 mt-0.5" />
+            <span><strong>Required:</strong> T1 and T2 weighted scans</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <FileText className="w-4 h-4 text-blue-600 mt-0.5" />
+            <span><strong>Optional:</strong> T1CE (contrast-enhanced) and FLAIR scans</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5" />
+            <span><strong>Format:</strong> NIfTI files (.nii or .nii.gz)</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <FolderOpen className="w-4 h-4 text-purple-600 mt-0.5" />
+            <span><strong>Tip:</strong> Use "Select Folder" to upload an entire case directory</span>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
